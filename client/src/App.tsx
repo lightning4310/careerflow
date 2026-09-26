@@ -1,6 +1,11 @@
 
 import { useEffect, useState, type SubmitEvent } from "react";
 import "./App.css";
+import API_BASE_URL from "./config/api";
+import ApplicationCard from "./components/ApplicationCard";
+import ApplicationForm from "./components/ApplicationForm";
+import { fetchApplications } from "./services/applicationService";
+import { saveApplication } from "./services/applicationService";
 
 function App() {
   // Application states
@@ -15,40 +20,72 @@ function App() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [isRegister, setIsRegister] = useState(false);
+  const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+
+  // Application form state
+  const [formData, setFormData] = useState({
+    company: "",
+    role: "",
+    location: "",
+    jobType: "",
+    workMode: "",
+    jobLink: "",
+    status: "SAVED",
+    salary: "",
+    notes: "",
+  });
+
+  // Reset and close the application form
+  const handleCancelForm = () => {
+    setShowForm(false);
+    setEditingId(null);
+
+    setFormData({
+      company: "",
+      role: "",
+      location: "",
+      jobType: "",
+      workMode: "",
+      jobLink: "",
+      status: "SAVED",
+      salary: "",
+      notes: "",
+    });
+  };
+
+  // Handle form input changes
+  const handleInputChange = (
+    e: React.ChangeEvent<
+      HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement
+    >
+  ) => {
+    const { name, value } = e.target;
+
+    setFormData((prev) => ({
+      ...prev,
+      [name]: value,
+    }));
+  };
 
   const [isLoggedIn, setIsLoggedIn] = useState(
     !!localStorage.getItem("token")
   );
 
+
   // Fetch applications after login
   useEffect(() => {
     if (!isLoggedIn) return;
 
-    const fetchApplications = async () => {
+    const loadApplications = async () => {
       setLoading(true);
       setDashboardError("");
 
       try {
         const token = localStorage.getItem("token");
+        const applications = await fetchApplications(token);
 
-        const response = await fetch(
-          "http://localhost:5000/api/applications",
-          {
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
-          }
-        );
-
-        const data = await response.json();
-
-        if (!response.ok) {
-          throw new Error(
-            data.message || "Failed to fetch applications"
-          );
-        }
-
-        setApplicationData(data.applications || []);
+        setApplicationData(applications);
       } catch (error) {
         setDashboardError(
           error instanceof Error
@@ -60,8 +97,9 @@ function App() {
       }
     };
 
-    fetchApplications();
+    loadApplications();
   }, [isLoggedIn]);
+
 
   // Login and registration handler
   const handleLogin = async (e: SubmitEvent<HTMLFormElement>) => {
@@ -72,8 +110,8 @@ function App() {
 
     try {
       const endpoint = isRegister
-        ? "http://localhost:5000/api/auth/register"
-        : "http://localhost:5000/api/auth/login";
+        ? `${API_BASE_URL}/api/auth/register`
+        : `${API_BASE_URL}/api/auth/login`;
 
       const body = isRegister
         ? { name, email, password }
@@ -113,12 +151,205 @@ function App() {
     }
   };
 
+  // Add or update an application
+  const handleAddApplication = async (
+    e: SubmitEvent<HTMLFormElement>
+  ) => {
+    e.preventDefault();
+    setDashboardError("");
+
+    try{
+      const token = localStorage.getItem("token")
+
+      const savedApplication = await saveApplication(
+        token,
+        formData,
+        editingId
+      );
+    if (editingId) {
+      setApplicationData((prev) =>
+      prev.map((application)=>
+      application._id === editingId
+      ? savedApplication
+      : application
+      )
+    );
+    
+  } else {
+    setApplicationData((prev) =>[
+      savedApplication,
+      ...prev,
+    ]);
+  }
+
+  setFormData({
+      company: "",
+      role: "",
+      location: "",
+      jobType: "",
+      workMode: "",
+      jobLink: "",
+      status: "SAVED",
+      salary: "",
+      notes: "",
+    });
+
+    setShowForm(false);
+    setEditingId(null);
+  }catch (error) {
+    setDashboardError(
+      error instanceof Error
+      ? error.message
+      :"Something went Wrong. Please try again."
+    );
+  }
+};
+  // Delete an application
+  const handleDeleteApplication = async (id: string) => {
+    const confirmed = window.confirm(
+      "Are you sure you want to delete this application?"
+    );
+
+    if (!confirmed) return;
+
+    setDashboardError("");
+
+    try {
+      const token = localStorage.getItem("token");
+
+      const response = await fetch(
+        `${API_BASE_URL}/api/applications/${id}`,
+        {
+          method: "DELETE",
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(
+          data.message || "Failed to delete application"
+        );
+      }
+
+      setApplicationData((prev) =>
+        prev.filter((application) => application._id !== id)
+      );
+    } catch (error) {
+      setDashboardError(
+        error instanceof Error
+          ? error.message
+          : "Something went wrong"
+      );
+    }
+  };
+
+  // Update application status
+  const handleStatusChange = async (
+    id: string,
+    newStatus: string
+  ) => {
+    setDashboardError("");
+
+    try {
+      const token = localStorage.getItem("token");
+
+      const response = await fetch(
+        `${API_BASE_URL}/api/applications/${id}`,
+        {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ status: newStatus }),
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          data.message || "Failed to update status"
+        );
+      }
+
+      setApplicationData((prev) =>
+        prev.map((application) =>
+          application._id === id
+            ? { ...application, ...data.application }
+            : application
+        )
+      );
+    } catch (error) {
+      setDashboardError(
+        error instanceof Error
+          ? error.message
+          : "Failed to update status"
+      );
+    }
+  };
+
+  // Prepare an application for editing
+  const handleEditApplication = (application: any) => {
+    setFormData({
+      company: application.company || "",
+      role: application.role || "",
+      location: application.location || "",
+      jobType: application.jobType || "",
+      workMode: application.workMode || "",
+      jobLink: application.jobLink || "",
+      status: application.status || "SAVED",
+      salary: application.salary?.toString() || "",
+      notes: application.notes || "",
+    });
+
+    setEditingId(application._id);
+    setShowForm(true);
+  };
+
+  // Logout
+  const handleLogout = () => {
+    localStorage.removeItem("token");
+    setIsLoggedIn(false);
+    setApplicationData([]);
+    setDashboardError("");
+    handleCancelForm();
+  };
+
   // Dashboard
   if (isLoggedIn) {
     return (
       <main className="dashboard">
         <h1>CareerFlow Dashboard</h1>
         <p>Your Career, Organized.</p>
+
+        <button onClick={handleLogout}>Logout</button>
+
+        <button
+          type="button"
+          onClick={() => {
+            if (showForm) {
+              handleCancelForm();
+            } else {
+              setShowForm(true);
+            }
+          }}
+        >
+          {showForm ? "Cancel" : "Add Application"}
+        </button>
+
+        {showForm && (
+          <ApplicationForm
+            formData={formData}
+            editingId={editingId}
+            onInputChange={handleInputChange}
+            onSubmit={handleAddApplication}
+          />
+        )}
 
         {loading && <p>Loading applications...</p>}
 
@@ -134,19 +365,15 @@ function App() {
             </p>
           )}
 
-        <div className="applications-list">
+        <div className="application-list">
           {applicationData.map((application) => (
-            <div
+            <ApplicationCard
               key={application._id}
-              className="application-card"
-            >
-              <h3>{application.role}</h3>
-              <p>{application.company}</p>
-              <p>Status: {application.status}</p>
-              <p>
-                Location: {application.location || "Not specified"}
-              </p>
-            </div>
+              application={application}
+              onEdit={handleEditApplication}
+              onDelete={handleDeleteApplication}
+              onStatusChange={handleStatusChange}
+            />
           ))}
         </div>
       </main>
